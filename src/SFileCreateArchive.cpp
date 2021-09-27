@@ -123,6 +123,7 @@ bool WINAPI SFileCreateArchive2(const TCHAR * szMpqName, PSFILE_CREATE_MPQ pCrea
        (pCreateInfo->dwMpqVersion > MPQ_FORMAT_VERSION_4)                              ||
        (pCreateInfo->pvUserData != NULL || pCreateInfo->cbUserData != 0)               ||
        (pCreateInfo->dwAttrFlags & ~MPQ_ATTRIBUTE_ALL)                                 ||
+       (pCreateInfo->dwMaxFileCount == 0)                                              ||
        (pCreateInfo->dwSectorSize & (pCreateInfo->dwSectorSize - 1))                   ||
        (pCreateInfo->dwRawChunkSize & (pCreateInfo->dwRawChunkSize - 1)))
     {
@@ -209,6 +210,7 @@ bool WINAPI SFileCreateArchive2(const TCHAR * szMpqName, PSFILE_CREATE_MPQ pCrea
         ha->MpqPos          = MpqPos;
         ha->pHeader         = pHeader = (TMPQHeader *)ha->HeaderData;
         ha->dwMaxFileCount  = dwHashTableSize;
+        ha->dwHashTableSize = dwHashTableSize;
         ha->dwFileTableSize = 0;
         ha->dwReservedFiles = dwReservedFiles;
         ha->dwFileFlags1    = pCreateInfo->dwFileFlags1;

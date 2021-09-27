@@ -735,6 +735,13 @@ bool IsValidHashEntry(TMPQArchive * ha, TMPQHash * pHash)
     return ((MPQ_BLOCK_INDEX(pHash) < ha->dwFileTableSize) && (pFileEntry->dwFlags & MPQ_FILE_EXISTS)) ? true : false;
 }
 
+bool IsValidHashEntry(TMPQArchive * ha, THashEntry * pHash)
+{
+    TFileEntry * pFileEntry = ha->pFileTable + pHash->dwBlockIndex;
+
+    return ((MPQ_BLOCK_INDEX(pHash) < ha->dwFileTableSize) && (pFileEntry->dwFlags & MPQ_FILE_EXISTS)) ? true : false;
+}
+
 // Hash entry verification when the file table does not exist yet
 static bool IsValidHashEntry1(TMPQArchive * ha, THashEntry * pHash, TMPQBlock * pBlockTable)
 {
@@ -898,7 +905,7 @@ static DWORD BuildFileTableFromBlockTable_OLD(
     // Defragment the hash table, if needed
     if(ha->dwFlags & MPQ_FLAG_HASH_TABLE_CUT)
     {
-        ha->pHashTableX = DefragmentHashTable(ha, ha->pHashTableX, pBlockTable);
+        ha->pHashTable = DefragmentHashTable(ha, ha->pHashTable, pBlockTable);
         ha->dwMaxFileCount = pHeader->dwHashTableSize;
     }
 
@@ -920,8 +927,8 @@ static DWORD BuildFileTableFromBlockTable_OLD(
     }
 
     // Parse the entire hash table
-    pHashTableEnd = ha->pHashTableX + pHeader->dwHashTableSize;
-    for(pHash = ha->pHashTableX; pHash < pHashTableEnd; pHash++)
+    pHashTableEnd = ha->pHashTable + pHeader->dwHashTableSize;
+    for(pHash = ha->pHashTable; pHash < pHashTableEnd; pHash++)
     {
         //
         // We need to properly handle these cases:
@@ -1980,9 +1987,21 @@ void FreeBetTable(TMPQBetTable * pBetTable)
 //-----------------------------------------------------------------------------
 // Support for file table
 
-TFileEntry * GetFileEntryLocale2(TMPQArchive * ha, const char * szFileName, LCID lcLocale, LPDWORD PtrHashIndex)
+DWORD FileIndexFromHashEntry(TMPQArchive * ha, THashEntry * pHashEntry, LPDWORD PtrHashIndex)
 {
-    TMPQHash * pHash;
+    if(pHashEntry != NULL)
+    {
+        if(PtrHashIndex != NULL)
+            PtrHashIndex[0] = (DWORD)(pHashEntry - ha->pHashTable);
+        return true;
+    }
+
+    return false;
+}
+
+TFileEntry * GetFileEntryLocale(TMPQArchive * ha, const char * szFileName, LCID lcLocale, LPDWORD PtrHashIndex)
+{
+    MPQ_HASH_ENTRIES Entries;
     DWORD dwFileIndex;
 
     // First, we have to search the classic hash table
@@ -1990,12 +2009,12 @@ TFileEntry * GetFileEntryLocale2(TMPQArchive * ha, const char * szFileName, LCID
     // we will need the pointer to hash table entry
     if(ha->pHashTable != NULL)
     {
-        pHash = GetHashEntryLocale(ha, szFileName, lcLocale, 0);
-        if(pHash != NULL && MPQ_BLOCK_INDEX(pHash) < ha->dwFileTableSize)
+        if(FindHashEntry(ha, szFileName, lcLocale, 0, Entries))
         {
-            if(PtrHashIndex != NULL)
-                PtrHashIndex[0] = (DWORD)(pHash - ha->pHashTable);
-            return ha->pFileTable + MPQ_BLOCK_INDEX(pHash);
+            if(FileIndexFromHashEntry(ha, Entries.pHashEntry1, PtrHashIndex))
+                return ha->pFileTable + Entries.pHashEntry1->dwBlockIndex;
+            if(FileIndexFromHashEntry(ha, Entries.pHashEntry2, PtrHashIndex))
+                return ha->pFileTable + Entries.pHashEntry2->dwBlockIndex;
         }
     }
 
@@ -2011,11 +2030,6 @@ TFileEntry * GetFileEntryLocale2(TMPQArchive * ha, const char * szFileName, LCID
     return NULL;
 }
 
-TFileEntry * GetFileEntryLocale(TMPQArchive * ha, const char * szFileName, LCID lcLocale)
-{
-    return GetFileEntryLocale2(ha, szFileName, lcLocale, NULL);
-}
-
 TFileEntry * GetFileEntryExact(TMPQArchive * ha, const char * szFileName, LCID lcLocale, LPDWORD PtrHashIndex)
 {
     TMPQHash * pHash;
@@ -2028,7 +2042,7 @@ TFileEntry * GetFileEntryExact(TMPQArchive * ha, const char * szFileName, LCID l
         if(pHash != NULL && MPQ_BLOCK_INDEX(pHash) < ha->dwFileTableSize)
         {
             if(PtrHashIndex != NULL)
-                PtrHashIndex[0] = (DWORD)(pHash - ha->pHashTable);
+                PtrHashIndex[0] = (DWORD)(pHash - ha->pHashTable_OLD);
             return ha->pFileTable + MPQ_BLOCK_INDEX(pHash);
         }
     }
@@ -2049,26 +2063,27 @@ TFileEntry * GetFileEntryExact(TMPQArchive * ha, const char * szFileName, LCID l
     return NULL;
 }
 
-void AllocateFileName(TMPQArchive * ha, THashEntry * pHashEntry, const char * szFileName)
+DWORD AllocateFileName(TMPQArchive * /* ha */, THashEntry * pHashEntry, const char * szFileName)
 {
     // Sanity check
     assert(pHashEntry != NULL);
 
-    // Skip invalid and non-existing entries
-    if((pHashEntry->dwBlockIndex < ha->dwFileTableSize) && (ha->pFileTable[pHashEntry->dwBlockIndex].dwFlags & MPQ_FILE_EXISTS))
+    // Only allocate new file name if it's not there yet
+    if(pHashEntry->szFileName == NULL)
     {
-        // Only allocate new file name if it's not there yet
-        if(pHashEntry->szFileName == NULL)
-        {
-            pHashEntry->szFileName = STORM_ALLOC(char, strlen(szFileName) + 1);
-            if(pHashEntry->szFileName != NULL)
-                strcpy(pHashEntry->szFileName, szFileName);
-        }
+        size_t nLength = strlen(szFileName) + 1;
+
+        // Allocate buffer for the file name
+        if((pHashEntry->szFileName = STORM_ALLOC(char, nLength)) == NULL)
+            return ERROR_NOT_ENOUGH_MEMORY;
+        memcpy(pHashEntry->szFileName, szFileName, nLength);
     }
+
+    return ERROR_SUCCESS;
 }
 
 // TODO: Remove this function, eventually
-void AllocateFileName(TMPQArchive * ha, TFileEntry * pFileEntry, const char * szFileName)
+DWORD AllocateFileName(TMPQArchive * ha, TFileEntry * pFileEntry, const char * szFileName)
 {
     // Sanity check
     assert(pFileEntry != NULL);
@@ -2097,7 +2112,49 @@ void AllocateFileName(TMPQArchive * ha, TFileEntry * pFileEntry, const char * sz
 
         pFileEntry->FileNameHash = (HashStringJenkins(szFileName) & AndMask64) | OrMask64;
     }
+
+    return ERROR_SUCCESS;
 }
+
+THashEntry * AllocateHashEntry(TMPQArchive * ha, const char * szFileName, LCID Locale, BYTE Platform)
+{
+    MPQ_HASH_ENTRIES Entries;
+    THashEntry * pEntry = NULL;
+    DWORD dwErrCode = ERROR_SUCCESS;
+
+    // Try to find an existing hash entry
+    if(!FindHashEntry(ha, szFileName, Locale, Platform, Entries))
+    {
+        // Assume full hash table unless we find a suitable entry
+        dwErrCode = ERROR_DISK_FULL;
+
+        // Set the search index
+        for(DWORD dwIndex = Entries.dwStartIndex; ; dwIndex = (dwIndex + 1) % ha->dwHashTableSize)
+        {
+            // Is that entry free or deleted?
+            if(ha->pHashTable[dwIndex].dwBlockIndex >= HASH_ENTRY_DELETED)
+            {
+                // Allocate the file name into the hash entry
+                dwErrCode = AllocateFileName(ha, ha->pHashTable + dwIndex, szFileName);
+                if(dwErrCode == ERROR_SUCCESS)
+                {
+                    pEntry = ha->pHashTable + dwIndex;
+                    pEntry->NameHash = Entries.NameHash;
+                    pEntry->Locale = (USHORT)Locale;
+                    pEntry->Platform = Platform;
+                    pEntry->Reserved = 0;
+                }
+                break;
+            }
+        }
+    }
+
+    // Set the last error
+    if(pEntry == NULL)
+        SetLastError(dwErrCode);
+    return pEntry;
+}
+
 
 TFileEntry * AllocateFileEntry(TMPQArchive * ha, const char * szFileName, LCID lcLocale, LPDWORD PtrHashIndex)
 {
@@ -2155,7 +2212,7 @@ TFileEntry * AllocateFileEntry(TMPQArchive * ha, const char * szFileName, LCID l
 
         // Set the file index to the hash table
         pHash->dwBlockIndex = (DWORD)(pFreeEntry - ha->pFileTable);
-        PtrHashIndex[0] = (DWORD)(pHash - ha->pHashTable);
+        PtrHashIndex[0] = (DWORD)(pHash - ha->pHashTable_OLD);
     }
 
     // If the archive has a HET table, just do some checks
@@ -2332,7 +2389,7 @@ void InvalidateInternalFiles(TMPQArchive * ha)
 
 DWORD CreateHashTable(TMPQArchive * ha, DWORD dwHashTableSize)
 {
-    TMPQHash * pHashTable;
+    THashEntry * pHashTable;
 
     // Sanity checks
     assert((dwHashTableSize & (dwHashTableSize - 1)) == 0);
@@ -2343,27 +2400,27 @@ DWORD CreateHashTable(TMPQArchive * ha, DWORD dwHashTableSize)
         dwHashTableSize = HASH_TABLE_SIZE_DEFAULT;
 
     // Create the hash table
-    pHashTable = STORM_ALLOC(TMPQHash, dwHashTableSize);
+    pHashTable = STORM_ALLOC(THashEntry, dwHashTableSize);
     if(pHashTable == NULL)
         return ERROR_NOT_ENOUGH_MEMORY;
 
     // Fill it
-    memset(pHashTable, 0xFF, dwHashTableSize * sizeof(TMPQHash));
+    memset(pHashTable, 0xFF, dwHashTableSize * sizeof(THashEntry));
     ha->pHeader->dwHashTableSize = dwHashTableSize;
     ha->dwMaxFileCount = dwHashTableSize;
     ha->pHashTable = pHashTable;
     return ERROR_SUCCESS;
 }
 
-static THashEntry * TransformHashTable(TMPQArchive * ha, TMPQHash * pHashTable, DWORD dwHashTableSize)
+static THashEntry * TransformHashTable(TMPQArchive * ha, TMPQHash * pHashTable_OLD, DWORD dwHashTableSize)
 {
-    THashEntry * pHashTableX;
+    THashEntry * pHashTable;
 
     // Allocate space for the hash table
-    if((pHashTableX = STORM_ALLOC(THashEntry, dwHashTableSize)) != NULL)
+    if((pHashTable = STORM_ALLOC(THashEntry, dwHashTableSize)) != NULL)
     {
         // Clear the hash table to only contain zeros
-        memset(pHashTableX, 0, sizeof(THashEntry) * dwHashTableSize);
+        memset(pHashTable, 0, sizeof(THashEntry) * dwHashTableSize);
 
         // Fill-in the table
         for(DWORD i = 0; i < dwHashTableSize; i++, pHashTable++)
@@ -2371,44 +2428,37 @@ static THashEntry * TransformHashTable(TMPQArchive * ha, TMPQHash * pHashTable, 
             // Free items must be preserved
             if(pHashTable->dwBlockIndex == HASH_ENTRY_FREE)
             {
-                pHashTableX[i].Name.n32.lo  =
-                pHashTableX[i].Name.n32.hi  = 0xFFFFFFFF;
-                pHashTableX[i].dwBlockIndex = HASH_ENTRY_FREE;
+                pHashTable[i].NameHash     = GetUlong64(0xFFFFFFFF, 0xFFFFFFFF);
+                pHashTable[i].dwBlockIndex = HASH_ENTRY_FREE;
                 continue;
             }
 
             // Preserve deleted items. Blatantly wrong items will be considered deleted too.
             // Note that upper 4 bits are ignored due to multiplication by 0x10
-            if(MPQ_BLOCK_INDEX(pHashTable) > ha->pHeader->dwBlockTableSize)
+            if(MPQ_BLOCK_INDEX(pHashTable) >= ha->pHeader->dwBlockTableSize)
             {
-                pHashTableX[i].Name.n32.lo  =
-                pHashTableX[i].Name.n32.hi  = 0xFFFFFFFF;
-                pHashTableX[i].dwBlockIndex = HASH_ENTRY_DELETED;
+                pHashTable[i].NameHash     = GetUlong64(0xFFFFFFFF, 0xFFFFFFFF);
+                pHashTable[i].dwBlockIndex = HASH_ENTRY_DELETED;
                 continue;
             }
 
             // Rest seems to be OK
-            pHashTableX[i].Name.n32.lo  = pHashTable->dwName1;
-            pHashTableX[i].Name.n32.hi  = pHashTable->dwName2;
-            pHashTableX[i].Locale       = pHashTable->lcLocale;
-            pHashTableX[i].Platform     = pHashTable->Platform;
-            pHashTableX[i].dwBlockIndex = MPQ_BLOCK_INDEX(pHashTable);
+            pHashTable[i].NameHash     = GetUlong64(pHashTable_OLD->dwName1, pHashTable_OLD->dwName2);
+            pHashTable[i].Locale       = pHashTable_OLD->lcLocale;
+            pHashTable[i].Platform     = pHashTable_OLD->Platform;
+            pHashTable[i].dwBlockIndex = MPQ_BLOCK_INDEX(pHashTable);
         }
     }
 
     // Return the transformed hash table
-    return pHashTableX;
+    return pHashTable;
 }
 
 static DWORD LoadHashTable(TMPQArchive * ha)
 {
     TMPQHeader * pHeader = ha->pHeader;
-    ULONGLONG ByteOffset;
     TMPQHash * pHashTable = NULL;
     DWORD dwErrCode = ERROR_CAN_NOT_COMPLETE;
-    DWORD dwTableSize;
-    DWORD dwCmpSize;
-    bool bHashTableIsCut = false;
 
     // Note: It is allowed to load hash table if it is at offset 0.
     // Example: MPQ_2016_v1_ProtectedMap_HashOffsIsZero.w3x
@@ -2422,19 +2472,7 @@ static DWORD LoadHashTable(TMPQArchive * ha)
         switch(ha->dwSubType)
         {
             case MPQ_SUBTYPE_MPQ:
-
-                // Calculate the position and size of the hash table
-                ByteOffset = FileOffsetFromMpqOffset(ha, MAKE_OFFSET64(pHeader->wHashTablePosHi, pHeader->dwHashTablePos));
-                dwTableSize = pHeader->dwHashTableSize * sizeof(TMPQHash);
-                dwCmpSize = (DWORD)pHeader->HashTableSize64;
-
-                // Read, decrypt and uncompress the hash table
-                pHashTable = (TMPQHash *)LoadMpqTable(ha, ByteOffset, pHeader->MD5_HashTable, dwCmpSize, dwTableSize, g_dwHashTableKey, &bHashTableIsCut);
-    //          DumpHashTable(pHashTable, pHeader->dwHashTableSize);
-
-                // If the hash table was cut, we can/have to defragment it
-                if(pHashTable != NULL && bHashTableIsCut)
-                    ha->dwFlags |= (MPQ_FLAG_MALFORMED | MPQ_FLAG_HASH_TABLE_CUT);
+                pHashTable = LoadMpqHashTable(ha);
                 break;
 
             case MPQ_SUBTYPE_SQP:
@@ -2449,7 +2487,7 @@ static DWORD LoadHashTable(TMPQArchive * ha)
         // Transform the hash table into the new hash table
         if(pHashTable != NULL)
         {
-            ha->pHashTableX = TransformHashTable(ha, pHashTable, pHeader->dwHashTableSize);
+            ha->pHashTable = TransformHashTable(ha, pHashTable, pHeader->dwHashTableSize);
             ha->dwHashTableSize = pHeader->dwHashTableSize;
             STORM_FREE(pHashTable);
             dwErrCode = ERROR_SUCCESS;
@@ -2584,13 +2622,13 @@ DWORD LoadAnyHashTable(TMPQArchive * ha)
         LoadHashTable(ha);
 
     // At least one of the tables must be present
-    if(ha->pHetTable == NULL && ha->pHashTableX == NULL)
+    if(ha->pHetTable == NULL && ha->pHashTable == NULL)
         return ERROR_FILE_CORRUPT;
 
     // Set the maximum file count to the size of the hash table.
     // Note: We don't care about HET table limits, because HET table is rebuilt
     // after each file add/rename/delete.
-    ha->dwMaxFileCount = (ha->pHashTableX != NULL) ? pHeader->dwHashTableSize : HASH_TABLE_SIZE_MAX;
+    ha->dwMaxFileCount = (ha->pHashTable != NULL) ? pHeader->dwHashTableSize : HASH_TABLE_SIZE_MAX;
     return ERROR_SUCCESS;
 }
 
@@ -2601,7 +2639,7 @@ static DWORD BuildFileTable_Classic(TMPQArchive * ha)
     DWORD dwErrCode = ERROR_NOT_ENOUGH_MEMORY;
 
     // Sanity checks
-    assert(ha->pHashTableX != NULL);
+    assert(ha->pHashTable != NULL);
     assert(ha->pFileTable != NULL);
 
     // If the MPQ has no block table, do nothing
@@ -2805,7 +2843,7 @@ DWORD BuildFileTable(TMPQArchive * ha)
 
     // If we have hash table, we load the file table from the block table
     // Note: If block table is corrupt or missing, we set the archive as read only
-    if(ha->pHashTableX != NULL)
+    if(ha->pHashTable != NULL)
     {
         if(BuildFileTable_Classic(ha) != ERROR_SUCCESS)
             ha->dwFlags |= MPQ_FLAG_READ_ONLY;
@@ -2892,11 +2930,11 @@ DWORD DefragmentFileTable(TMPQArchive * ha)
             // Go through the hash table and relocate the block indexes
             if(ha->pHashTable != NULL)
             {
-                TMPQHash * pHashTableEnd = ha->pHashTable + ha->pHeader->dwHashTableSize;
+                TMPQHash * pHashTableEnd = ha->pHashTable_OLD + ha->pHeader->dwHashTableSize;
                 TMPQHash * pHash;
 				DWORD dwNewBlockIndex;
 
-                for(pHash = ha->pHashTable; pHash < pHashTableEnd; pHash++)
+                for(pHash = ha->pHashTable_OLD; pHash < pHashTableEnd; pHash++)
                 {
                     if(MPQ_BLOCK_INDEX(pHash) < ha->dwFileTableSize)
 					{
@@ -2966,8 +3004,8 @@ DWORD RebuildHetTable(TMPQArchive * ha)
 DWORD RebuildFileTable(TMPQArchive * ha, DWORD dwNewHashTableSize)
 {
     TFileEntry * pFileEntry;
-    TMPQHash * pHashTableEnd = ha->pHashTable + ha->pHeader->dwHashTableSize;
-    TMPQHash * pOldHashTable = ha->pHashTable;
+    TMPQHash * pHashTableEnd = ha->pHashTable_OLD + ha->pHeader->dwHashTableSize;
+    TMPQHash * pOldHashTable = ha->pHashTable_OLD;
     TMPQHash * pHashTable = NULL;
     TMPQHash * pHash;
     DWORD dwErrCode = ERROR_SUCCESS;
@@ -3001,7 +3039,7 @@ DWORD RebuildFileTable(TMPQArchive * ha, DWORD dwNewHashTableSize)
     {
         // Make sure that the hash table is properly filled
         memset(pHashTable, 0xFF, sizeof(TMPQHash) * dwNewHashTableSize);
-        ha->pHashTable = pHashTable;
+        // TODO: ha->pHashTable = pHashTable_OLD;
 
         // Set the new limits to the MPQ archive
         ha->pHeader->dwHashTableSize = dwNewHashTableSize;

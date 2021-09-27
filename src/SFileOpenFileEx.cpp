@@ -27,15 +27,15 @@ static DWORD FindHashIndex(TMPQArchive * ha, DWORD dwFileIndex)
 
     // Multiple hash table entries can point to the file table entry.
     // We need to search all of them
-    pHashTableEnd = ha->pHashTable + ha->pHeader->dwHashTableSize;
-    for(pHash = ha->pHashTable; pHash < pHashTableEnd; pHash++)
+    pHashTableEnd = ha->pHashTable_OLD + ha->pHeader->dwHashTableSize;
+    for(pHash = ha->pHashTable_OLD; pHash < pHashTableEnd; pHash++)
     {
         if(MPQ_BLOCK_INDEX(pHash) == dwFileIndex)
         {
             // Duplicate hash entry found
             if(dwFirstIndex != HASH_ENTRY_FREE)
                 return HASH_ENTRY_FREE;
-            dwFirstIndex = (DWORD)(pHash - ha->pHashTable);
+            dwFirstIndex = (DWORD)(pHash - ha->pHashTable_OLD);
         }
     }
 
@@ -263,7 +263,7 @@ bool WINAPI SFileOpenFileEx(HANDLE hMpq, const char * szFileName, DWORD dwSearch
                 // If this MPQ has no patches, open the file from this MPQ directly
                 if(ha->haPatch == NULL || dwSearchScope == SFILE_OPEN_BASE_FILE)
                 {
-                    pFileEntry = GetFileEntryLocale2(ha, szFileName, g_FileLocale, &dwHashIndex);
+                    pFileEntry = GetFileEntryLocale(ha, szFileName, g_FileLocale, &dwHashIndex);
                 }
 
                 // If this MPQ is a patched archive, open the file as patched
@@ -278,7 +278,7 @@ bool WINAPI SFileOpenFileEx(HANDLE hMpq, const char * szFileName, DWORD dwSearch
                 // This open option is reserved for opening MPQ internal listfile.
                 // No argument validation. Tries to open file with neutral locale first,
                 // then any other available.
-                pFileEntry = GetFileEntryLocale2(ha, szFileName, 0, &dwHashIndex);
+                pFileEntry = GetFileEntryLocale(ha, szFileName, 0, &dwHashIndex);
                 break;
 
             case SFILE_OPEN_LOCAL_FILE:
@@ -346,10 +346,11 @@ bool WINAPI SFileOpenFileEx(HANDLE hMpq, const char * szFileName, DWORD dwSearch
         if(hf != NULL)
         {
             // Get the hash index for the file
+            // TODO: Possibly remove TMPQFile::dwHashIndex because of uncertainty
             if(ha->pHashTable != NULL && dwHashIndex == HASH_ENTRY_FREE)
                 dwHashIndex = FindHashIndex(ha, dwFileIndex);
             if(dwHashIndex != HASH_ENTRY_FREE)
-                hf->pHashEntry = ha->pHashTable + dwHashIndex;
+                hf->pHashEntry = ha->pHashTable_OLD + dwHashIndex;
             hf->dwHashIndex = dwHashIndex;
 
             // If the MPQ has sector CRC enabled, enable if for the file
@@ -359,9 +360,6 @@ bool WINAPI SFileOpenFileEx(HANDLE hMpq, const char * szFileName, DWORD dwSearch
             // If we know the real file name, copy it to the file entry
             if(bOpenByIndex == false)
             {
-                // If there is no file name yet, allocate it
-                AllocateFileName(ha, pFileEntry, szFileName);
-
                 // If the file is encrypted, we should detect the file key
                 if(pFileEntry->dwFlags & MPQ_FILE_ENCRYPTED)
                 {

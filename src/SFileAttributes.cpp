@@ -437,6 +437,7 @@ DWORD SAttrFileSaveToMpq(TMPQArchive * ha)
                                            0,
                                            cbAttrFile,
                                            LANG_NEUTRAL,
+                                           0,
                                            ha->dwFileFlags2 | MPQ_FILE_REPLACEEXISTING,
                                           &hf);
 

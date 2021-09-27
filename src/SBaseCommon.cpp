@@ -730,6 +730,26 @@ TMPQFile * IsValidFileHandle(HANDLE hFile)
 //-----------------------------------------------------------------------------
 // Hash table and block table manipulation
 
+ULONGLONG GetUlong64(DWORD lo, DWORD hi)
+{
+    TUlong64 NameHash;
+
+    NameHash.n32.lo = lo;
+    NameHash.n32.hi = hi;
+    return NameHash.n64;
+}
+
+ULONGLONG GetFileNameHash(TMPQArchive * ha, const char * szFileName)
+{
+    TUlong64 NameHash;
+
+    // TODO: Jenkins hash for archives version 3+
+
+    NameHash.n32.lo = ha->pfnHashString(szFileName, MPQ_HASH_NAME_A);
+    NameHash.n32.hi = ha->pfnHashString(szFileName, MPQ_HASH_NAME_B);
+    return NameHash.n64;
+}
+
 // Attempts to search a free hash entry, or an entry whose names and locale matches
 TMPQHash * FindFreeHashEntry(TMPQArchive * ha, DWORD dwStartIndex, DWORD dwName1, DWORD dwName2, LCID lcLocale)
 {
@@ -748,7 +768,7 @@ TMPQHash * FindFreeHashEntry(TMPQArchive * ha, DWORD dwStartIndex, DWORD dwName1
     // 4) NULL
     for(;;)
     {
-        TMPQHash * pHash = ha->pHashTable + dwIndex;
+        TMPQHash * pHash = ha->pHashTable_OLD + dwIndex;
 
         // If we found a matching entry, return that one
         if(pHash->dwName1 == dwName1 && pHash->dwName2 == dwName2 && pHash->lcLocale == lcLocale)
@@ -793,7 +813,7 @@ TMPQHash * GetFirstHashEntry(TMPQArchive * ha, const char * szFileName)
     // Search the hash table
     for(;;)
     {
-        TMPQHash * pHash = ha->pHashTable + dwIndex;
+        TMPQHash * pHash = ha->pHashTable_OLD + dwIndex;
 
         // If the entry matches, we found it.
         if(pHash->dwName1 == dwName1 && pHash->dwName2 == dwName2 && MPQ_BLOCK_INDEX(pHash) < ha->dwFileTableSize)
@@ -814,10 +834,10 @@ TMPQHash * GetFirstHashEntry(TMPQArchive * ha, const char * szFileName)
 TMPQHash * GetNextHashEntry(TMPQArchive * ha, TMPQHash * pFirstHash, TMPQHash * pHash)
 {
     DWORD dwHashIndexMask = HASH_INDEX_MASK(ha);
-    DWORD dwStartIndex = (DWORD)(pFirstHash - ha->pHashTable);
+    DWORD dwStartIndex = (DWORD)(pFirstHash - ha->pHashTable_OLD);
     DWORD dwName1 = pHash->dwName1;
     DWORD dwName2 = pHash->dwName2;
-    DWORD dwIndex = (DWORD)(pHash - ha->pHashTable);
+    DWORD dwIndex = (DWORD)(pHash - ha->pHashTable_OLD);
 
     // Now go for any next entry that follows the pHash,
     // until either free hash entry was found, or the start entry was reached
@@ -828,7 +848,7 @@ TMPQHash * GetNextHashEntry(TMPQArchive * ha, TMPQHash * pFirstHash, TMPQHash * 
         dwIndex = (dwIndex + 1) & dwHashIndexMask;
         if(dwIndex == dwStartIndex)
             return NULL;
-        pHash = ha->pHashTable + dwIndex;
+        pHash = ha->pHashTable_OLD + dwIndex;
 
         // If the entry matches, we found it.
         if(pHash->dwName1 == dwName1 && pHash->dwName2 == dwName2 && MPQ_BLOCK_INDEX(pHash) < ha->dwFileTableSize)
@@ -840,44 +860,33 @@ TMPQHash * GetNextHashEntry(TMPQArchive * ha, TMPQHash * pFirstHash, TMPQHash * 
     }
 }
 
-//
 // The search algorithm is based on what's in Storm.dll (Warcraft III 1.26a) at 15017860
 // 1. If there is exact match in the Locale & Platform, this entry is returned as the first one
 // 2. If the hash entry has locale & platform 0, that one is considered "best match".
-//
-
 bool FindHashEntry(TMPQArchive * ha, const char * szFileName, LCID FileLocale, BYTE Platform, MPQ_HASH_ENTRIES & Entries)
 {
     THashEntry * pHash;
-    DWORD dwStartIndex = ha->pfnHashString(szFileName, MPQ_HASH_TABLE_INDEX);
-    DWORD dwName1 = ha->pfnHashString(szFileName, MPQ_HASH_NAME_A);
-    DWORD dwName2 = ha->pfnHashString(szFileName, MPQ_HASH_NAME_B);
     DWORD dwIndex;
 
     // Reset the structure
     Entries.pHashEntry1 = NULL;
     Entries.pHashEntry2 = NULL;
+    Entries.NameHash = GetFileNameHash(ha, szFileName);
+    Entries.dwStartIndex = ha->pfnHashString(szFileName, MPQ_HASH_TABLE_INDEX) % ha->dwHashTableSize;
 
     // Set the initial index
-    dwStartIndex = dwIndex = (dwStartIndex % ha->dwHashTableSize);
+    dwIndex = Entries.dwStartIndex;
+    pHash = ha->pHashTable + dwIndex;
 
-    // Check for the termination entry. According to Storm.dll, it is done on the startup entry only
-    // Storm.dll: 150178AD (Warcraft III 1.26a)
-    if(ha->pHashTableX[dwIndex].dwBlockIndex == HASH_ENTRY_FREE)
-        return false;
-
-    // Search the entire hash entry
-    do
+    // Check for termination entry
+    while(pHash->dwBlockIndex != HASH_ENTRY_FREE)
     {
-        // Get the hash entry corresponding to the index. Check for the terminating entry
-        pHash = ha->pHashTableX + dwIndex;
-
-        // Check for name match
+        // Check for name match. Note that Storm.dll checks for HASH_ENTRY_DELETED only
         // Storm.dll: 150178B8 (Warcraft III 1.26a)
-        if(pHash->Name.n32.lo == dwName1 && pHash->Name.n32.hi == dwName2 && pHash->dwBlockIndex != HASH_ENTRY_DELETED)
+        if(pHash->NameHash == Entries.NameHash && pHash->dwBlockIndex != HASH_ENTRY_DELETED)
         {
             // Check for exact match. Note that in Warcraft III, this is usually called with nonzero locale
-            // Storm.dll: 150178CF(Warcraft III 1.26a)
+            // Storm.dll: 150178CF (Warcraft III 1.26a)
             if((FileLocale || Platform) && (pHash->Locale == FileLocale && pHash->Platform == Platform))
             {
                 // Only take the first one
@@ -891,6 +900,15 @@ bool FindHashEntry(TMPQArchive * ha, const char * szFileName, LCID FileLocale, B
             {
                 if(pHash->Platform == 0 || pHash->Platform == Platform)
                 {
+                    // Invalidate the previous-best match
+                    //if(Entries.pHashEntry2 != NULL)
+                    //{
+                    //    assert(Entries.pHashEntry2->szFileName == NULL);
+                    //    memset(Entries.pHashEntry2, 0xFF, sizeof(THashEntry));
+                    //    Entries.pHashEntry2->dwBlockIndex = HASH_ENTRY_DELETED;
+                    //}
+
+                    // Set the new second-best match
                     Entries.pHashEntry2 = pHash;
                 }
             }
@@ -898,11 +916,43 @@ bool FindHashEntry(TMPQArchive * ha, const char * szFileName, LCID FileLocale, B
 
         // Move to the next hash entry. Stop if we reached the start entry
         dwIndex = (dwIndex + 1) % ha->dwHashTableSize;
+        pHash = ha->pHashTable + dwIndex;
     }
-    while(dwIndex != dwStartIndex);
+
+    // Supply the file name for each found hash entry
+    if(Entries.pHashEntry1)
+        AllocateFileName(ha, Entries.pHashEntry1, szFileName);
+    if(Entries.pHashEntry2)
+        AllocateFileName(ha, Entries.pHashEntry2, szFileName);
 
     // Return whether we found something
     return (Entries.pHashEntry1 || Entries.pHashEntry2);
+}
+
+bool ForEachHashEntry(TMPQArchive * ha, const char * szFileName, HASH_ENTRY_CB PfnCallback, void * Context)
+{
+    THashEntry * pHashEntry = ha->pHashTable;
+    ULONGLONG NameHash = GetFileNameHash(ha, szFileName);
+
+    for(DWORD i = 0; i < ha->dwHashTableSize; i++, pHashEntry++)
+    {
+        // Check for valid hash entry
+        if(pHashEntry->NameHash == NameHash && pHashEntry->dwBlockIndex < ha->dwFileTableSize)
+        {
+            // Does the file exist?
+            if(ha->pFileTable[pHashEntry->dwBlockIndex].dwFlags & MPQ_FILE_EXISTS)
+            {
+                if(!PfnCallback(ha, szFileName, pHashEntry, Context))
+                {
+                    // Enumeration was terminated early
+                    return false;
+                }
+            }
+        }
+    }
+
+    // This return value indicated that all entries were searched
+    return true;
 }
 
 // Allocates an entry in the hash table
@@ -1156,6 +1206,30 @@ void * LoadMpqTable(
 
     // Return the MPQ table
     return pbMpqTable;
+}
+
+TMPQHash * LoadMpqHashTable(TMPQArchive * ha)
+{
+    ULONGLONG ByteOffset;
+    TMPQHeader * pHeader = ha->pHeader;
+    TMPQHash * pHashTable;
+    DWORD dwTableSize;
+    DWORD dwCmpSize;
+    bool bHashTableIsCut = false;
+
+    // Calculate the position and size of the hash table
+    ByteOffset = FileOffsetFromMpqOffset(ha, MAKE_OFFSET64(pHeader->wHashTablePosHi, pHeader->dwHashTablePos));
+    dwTableSize = pHeader->dwHashTableSize * sizeof(TMPQHash);
+    dwCmpSize = (DWORD)pHeader->HashTableSize64;
+
+    // Read, decrypt and uncompress the hash table
+    pHashTable = (TMPQHash *)LoadMpqTable(ha, ByteOffset, pHeader->MD5_HashTable, dwCmpSize, dwTableSize, g_dwHashTableKey, &bHashTableIsCut);
+//  DumpHashTable(pHashTable, pHeader->dwHashTableSize);
+
+    // If the hash table was cut, we can/have to defragment it
+    if(pHashTable != NULL && bHashTableIsCut)
+        ha->dwFlags |= (MPQ_FLAG_MALFORMED | MPQ_FLAG_HASH_TABLE_CUT);
+    return pHashTable;
 }
 
 unsigned char * AllocateMd5Buffer(
@@ -1781,17 +1855,17 @@ void FreeArchiveHandle(TMPQArchive *& ha)
         }
 
         // Free file names from the hash table
-        if(ha->pHashTableX != NULL)
+        if(ha->pHashTable != NULL)
         {
             for(DWORD i = 0; i < ha->dwHashTableSize; i++)
             {
-                if(ha->pHashTableX[i].szFileName != NULL)
-                    STORM_FREE(ha->pHashTableX[i].szFileName);
-                ha->pHashTableX[i].szFileName = NULL;
+                if(ha->pHashTable[i].szFileName != NULL)
+                    STORM_FREE(ha->pHashTable[i].szFileName);
+                ha->pHashTable[i].szFileName = NULL;
             }
 
             // Then free the hash table itself
-            STORM_FREE(ha->pHashTableX);
+            STORM_FREE(ha->pHashTable);
         }
 
         if(ha->pHashTable != NULL)

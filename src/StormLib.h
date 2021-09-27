@@ -387,6 +387,10 @@ extern "C" {
 #define MD5_DIGEST_SIZE                   0x10
 #endif
 
+#ifndef MD5_STRING_SIZE
+#define MD5_STRING_SIZE                   ((MD5_DIGEST_SIZE * 2) + 1)
+#endif
+
 #ifndef SHA1_DIGEST_SIZE
 #define SHA1_DIGEST_SIZE                  0x14  // 160 bits
 #endif
@@ -497,6 +501,18 @@ struct TMPQBits;
 #define MPQ_HEADER_SIZE_V3    0x44
 #define MPQ_HEADER_SIZE_V4    0xD0
 #define MPQ_HEADER_DWORDS     (MPQ_HEADER_SIZE_V4 / 0x04)
+
+union TUlong64
+{
+    ULONGLONG n64;                              // Full 64-bit value
+
+    struct
+    {
+        DWORD lo;                               // Lower 32-bit part of the value
+        DWORD hi;                               // Higher 32-bit part of the value
+    } n32;
+
+};
 
 struct TMPQUserData
 {
@@ -786,18 +802,7 @@ struct TFileEntry
 // Combined hash entry, created either from the legacy hash table, or from HET table.
 struct THashEntry
 {
-    union
-    {
-        ULONGLONG n64;                          // 64-bit value of the file name hash
-
-        struct
-        {
-            DWORD lo;                           // The 1st 32-bit part of the file name
-            DWORD hi;                           // The 2nd 32-bit part of the file name
-        } n32;
-
-    } Name;
-
+    ULONGLONG NameHash;                         // Hash of the file name
     char * szFileName;                          // File name, if known, otherwise NULL
     DWORD  dwBlockIndex;                        // Index to the file table
     USHORT Locale;                              // File locale
@@ -839,11 +844,11 @@ struct TMPQArchive
 
     TMPQUserData * pUserData;                   // MPQ user data (NULL if not present in the file)
     TMPQHeader   * pHeader;                     // MPQ file header
-    TMPQHash     * pHashTable;                  // Hash table (old)
+    TMPQHash     * pHashTable_OLD;              // Hash table (old)
     TMPQHetTable * pHetTable;                   // HET table
 
     TFileEntry   * pFileTable;                  // File table
-    THashEntry   * pHashTableX;                  // Hash table
+    THashEntry   * pHashTable;                  // Hash table
     HASH_STRING    pfnHashString;               // Hashing function that will convert the file name into hash
 
     TMPQUserData   UserData;                    // MPQ user data. Valid only when ID_MPQ_USERDATA has been found

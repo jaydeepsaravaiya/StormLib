@@ -401,9 +401,11 @@ DWORD SFileAddFile_Init(
     ULONGLONG FileTime,
     DWORD dwFileSize,
     LCID lcLocale,
+    BYTE Platform,
     DWORD dwFlags,
     TMPQFile ** phf)
 {
+    THashEntry * pHashEntry = NULL;
     TFileEntry * pFileEntry = NULL;
     TMPQFile * hf = NULL;               // File structure for newly added file
     DWORD dwHashIndex = HASH_ENTRY_FREE;
@@ -434,12 +436,31 @@ DWORD SFileAddFile_Init(
 
     // Allocate the TMPQFile entry for newly added file
     hf = CreateWritableHandle(ha, dwFileSize);
-    if(hf == NULL)
-        return false;
+    if(hf != NULL)
+    {
+        // Allocate the hash entry
+        pHashEntry = AllocateHashEntry(ha, szFileName, lcLocale, Platform);
+        if(pHashEntry != NULL)
+        {
+            // If the hash entry points to an existing file, the MPQ_FILE_REPLACEEXISTING must be set
+            if(IsValidHashEntry(ha, pHashEntry) && (dwFlags & MPQ_FILE_REPLACEEXISTING) == 0)
+                dwErrCode = ERROR_ALREADY_EXISTS;
+
+
+            // Allocate file entry in the table
+            pFileEntry = AllocateFileEntry(ha, pHashEntry);
+
+        }
+        else
+            dwErrCode = GetLastError();
+    }
+    else
+        dwErrCode = ERROR_NOT_ENOUGH_MEMORY;
 
     // Allocate file entry in the MPQ
     if(dwErrCode == ERROR_SUCCESS)
     {
+
         // Check if the file already exists in the archive
         pFileEntry = GetFileEntryExact(ha, szFileName, lcLocale, &dwHashIndex);
         if(pFileEntry != NULL)
@@ -466,7 +487,7 @@ DWORD SFileAddFile_Init(
     // Prepare the pointer to hash table entry
     if(dwErrCode == ERROR_SUCCESS && ha->pHashTable != NULL && dwHashIndex < ha->pHeader->dwHashTableSize)
     {
-        hf->pHashEntry = ha->pHashTable + dwHashIndex;
+        hf->pHashEntry = ha->pHashTable_OLD + dwHashIndex;
         hf->pHashEntry->lcLocale = (USHORT)lcLocale;
     }
 
@@ -537,8 +558,8 @@ DWORD SFileAddFile_Init(
     // Prepare the pointer to hash table entry
     if(dwErrCode == ERROR_SUCCESS && ha->pHashTable != NULL && hfSrc->pHashEntry != NULL)
     {
-        hf->dwHashIndex = (DWORD)(hfSrc->pHashEntry - hfSrc->ha->pHashTable);
-        hf->pHashEntry = ha->pHashTable + hf->dwHashIndex;
+        hf->dwHashIndex = (DWORD)(hfSrc->pHashEntry - hfSrc->ha->pHashTable_OLD);
+        hf->pHashEntry = ha->pHashTable_OLD + hf->dwHashIndex;
     }
 
     // Prepare the file key (copy from source file)
@@ -804,7 +825,7 @@ bool WINAPI SFileCreateFile(
 
     // Initiate the add file operation
     if(dwErrCode == ERROR_SUCCESS)
-        dwErrCode = SFileAddFile_Init(ha, szArchivedName, FileTime, dwFileSize, lcLocale, dwFlags, (TMPQFile **)phFile);
+        dwErrCode = SFileAddFile_Init(ha, szArchivedName, FileTime, dwFileSize, lcLocale, g_Platform, dwFlags, (TMPQFile **)phFile);
 
     // Deal with the errors
     if(dwErrCode != ERROR_SUCCESS)

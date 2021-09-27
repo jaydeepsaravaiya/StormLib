@@ -403,44 +403,11 @@ static LPBYTE CreateListFile(TMPQArchive * ha, DWORD * pcbListFile)
 //-----------------------------------------------------------------------------
 // Local functions (listfile nodes)
 
-// Adds a name into the list of all names. For each locale in the MPQ,
-// one entry will be created
-// If the file name is already there, does nothing.
-static DWORD SListFileCreateNodeForAllLocales(TMPQArchive * ha, const char * szFileName)
+// Adds a name into a hash entry. Called for all valid hash entries in the MPQ
+static bool SetFileName(TMPQArchive * ha, const char * szFileName, THashEntry * pHashEntry, void *)
 {
-    TFileEntry * pFileEntry;
-
-    // If we have HET table, use that one
-    if(ha->pHetTable != NULL)
-    {
-        pFileEntry = GetFileEntryLocale(ha, szFileName, 0);
-        if(pFileEntry != NULL)
-        {
-            // Allocate file name for the file entry
-            AllocateFileName(ha, pFileEntry, szFileName);
-        }
-
-        return ERROR_SUCCESS;
-    }
-
-    // If we have hash table, we use it
-    if(ha->pHashTable != NULL)
-    {
-        MPQ_HASH_ENTRIES Entries;
-
-        // Find all candidates on the file
-        if(FindHashEntry(ha, szFileName, g_FileLocale, g_Platform, Entries))
-        {
-            if(Entries.pHashEntry1 != NULL)
-                AllocateFileName(ha, Entries.pHashEntry1, szFileName);
-            if(Entries.pHashEntry2 != NULL)
-                AllocateFileName(ha, Entries.pHashEntry2, szFileName);
-        }
-
-        return ERROR_SUCCESS;
-    }
-
-    return ERROR_CAN_NOT_COMPLETE;
+    AllocateFileName(ha, pHashEntry, szFileName);
+    return true;
 }
 
 // Saves the whole listfile to the MPQ
@@ -474,6 +441,7 @@ DWORD SListFileSaveToMpq(TMPQArchive * ha)
                                            0,
                                            cbListFile,
                                            LANG_NEUTRAL,
+                                           0,
                                            ha->dwFileFlags1 | MPQ_FILE_REPLACEEXISTING,
                                           &hf);
 
@@ -532,14 +500,7 @@ static DWORD SFileAddArbitraryListFile(
         {
             if(nLength != 0)
             {
-                // Stop on watched file
-                //if(!_stricmp(szFileName, "(2)Harrow.w3m"))
-                //    __debugbreak();
-                //if(!_stricmp(szFileName, "scripts\\war3map.j"))
-                //    __debugbreak();
-
-                // Second, add file for all locales
-                SListFileCreateNodeForAllLocales(ha, szFileName);
+                ForEachHashEntry(ha, szFileName, SetFileName, NULL);
             }
         }
 
@@ -550,48 +511,35 @@ static DWORD SFileAddArbitraryListFile(
     return (pCache != NULL) ? ERROR_SUCCESS : ERROR_FILE_CORRUPT;
 }
 
+static bool AddListFile(TMPQArchive * ha, const char * szFileName, THashEntry * pHashEntry, void * Context)
+{
+    DWORD dwMaxSize = MAX_LISTFILE_SIZE;
+
+    // If the archive is a malformed map, ignore too large listfiles
+    if(ha->dwFlags & MPQ_FLAG_MALFORMED)
+        dwMaxSize = 0x40000;
+
+    // Set the file locale
+    SFileSetLocale(pHashEntry->Locale);
+    SFileAddArbitraryListFile(ha, (HANDLE)ha, NULL, dwMaxSize);
+    return true;
+}
+
 static DWORD SFileAddInternalListFile(
     TMPQArchive * ha,
     HANDLE hMpq)
 {
-    TMPQHash * pFirstHash;
-    TMPQHash * pHash;
     LCID lcSaveLocale = g_FileLocale;
-    DWORD dwMaxSize = MAX_LISTFILE_SIZE;
-    DWORD dwErrCode = ERROR_SUCCESS;
 
-    // If there is hash table, we need to support multiple listfiles
-    // with different locales (BrooDat.mpq)
-    if(ha->pHashTable != NULL)
-    {
-        // If the archive is a malformed map, ignore too large listfiles
-        if(ha->dwFlags & MPQ_FLAG_MALFORMED)
-            dwMaxSize = 0x40000;
+    // We need to support multiple listfiles with different locales (BrooDat.mpq).
+    // Enumerate hash table and add each found list file
+    ForEachHashEntry(ha, LISTFILE_NAME, AddListFile, NULL);
 
-        pFirstHash = pHash = GetFirstHashEntry(ha, LISTFILE_NAME);
-        while(dwErrCode == ERROR_SUCCESS && pHash != NULL)
-        {
-            // Set the prefered locale to that from list file
-            SFileSetLocale(pHash->lcLocale);
-
-            // Add that listfile
-            dwErrCode = SFileAddArbitraryListFile(ha, hMpq, NULL, dwMaxSize);
-
-            // Move to the next hash
-            pHash = GetNextHashEntry(ha, pFirstHash, pHash);
-        }
-
-        // Restore the original locale
-        SFileSetLocale(lcSaveLocale);
-    }
-    else
-    {
-        // Add the single listfile
-        dwErrCode = SFileAddArbitraryListFile(ha, hMpq, NULL, dwMaxSize);
-    }
+    // Restore the original locale
+    SFileSetLocale(lcSaveLocale);
 
     // Return the result of the operation
-    return dwErrCode;
+    return ERROR_SUCCESS;
 }
 
 static bool DoListFileSearch(TListFileCache * pCache, SFILE_FIND_DATA * lpFindFileData)
@@ -643,9 +591,9 @@ DWORD WINAPI SFileAddListFile(HANDLE hMpq, const TCHAR * szListFile)
 
         // Also, add three special files to the listfile:
         // (listfile) itself, (attributes) and (signature)
-        SListFileCreateNodeForAllLocales(ha, LISTFILE_NAME);
-        SListFileCreateNodeForAllLocales(ha, SIGNATURE_NAME);
-        SListFileCreateNodeForAllLocales(ha, ATTRIBUTES_NAME);
+        GetFileEntryLocale(ha, LISTFILE_NAME, 0, NULL);
+        GetFileEntryLocale(ha, SIGNATURE_NAME, 0, NULL);
+        GetFileEntryLocale(ha, ATTRIBUTES_NAME, 0, NULL);
 
         // Move to the next archive in the chain
         ha = ha->haPatch;

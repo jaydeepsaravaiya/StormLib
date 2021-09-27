@@ -800,6 +800,7 @@ DWORD SSignFileCreate(TMPQArchive * ha)
                                        0,
                                        sizeof(EmptySignature),
                                        LANG_NEUTRAL,
+                                       0,
                                        ha->dwFileFlags3 | MPQ_FILE_REPLACEEXISTING,
                                       &hf);
 

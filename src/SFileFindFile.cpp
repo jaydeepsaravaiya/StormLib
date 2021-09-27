@@ -19,7 +19,7 @@
 struct TMPQSearch
 {
     TMPQArchive * ha;                   // Handle to MPQ, where the search runs
-    TFileEntry ** pSearchTable;         // Table for files that have been already found
+    THashEntry ** pSearchTable;         // Table for files that have been already found
     DWORD  dwSearchTableItems;          // Number of items in the search table
     DWORD  dwNextIndex;                 // Next file index to be checked
     DWORD  dwFlagMask;                  // For checking flag mask
@@ -109,14 +109,14 @@ static DWORD GetSearchTableItems(TMPQArchive * ha)
     // Return the double size of number of items
     return (dwMergeItems | 1);
 }
-
+/*
 static bool FileWasFoundBefore(
     TMPQArchive * ha,
     TMPQSearch * hs,
-    TFileEntry * pFileEntry)
+    THashEntry * pHashEntry)
 {
-    TFileEntry * pEntry;
-    char * szRealFileName = pFileEntry->szFileName;
+    THashEntry * pEntry;
+    char * szRealFileName = pHashEntry->szFileName;
     DWORD dwStartIndex;
     DWORD dwNameHash;
     DWORD dwIndex;
@@ -166,11 +166,11 @@ static bool FileWasFoundBefore(
         }
 
         // Put the entry to the table for later use
-        hs->pSearchTable[dwIndex] = pFileEntry;
+        hs->pSearchTable[dwIndex] = pHashEntry;
     }
     return false;
 }
-
+*/
 static TFileEntry * FindPatchEntry(TMPQArchive * ha, TFileEntry * pFileEntry)
 {
     TFileEntry * pPatchEntry = pFileEntry;
@@ -207,7 +207,7 @@ static bool DoMPQSearch_FileEntry(
     TMPQSearch * hs,
     SFILE_FIND_DATA * lpFindFileData,
     TMPQArchive * ha,
-    TMPQHash * pHashEntry,
+    THashEntry * pHashEntry,
     TFileEntry * pFileEntry)
 {
     TFileEntry * pPatchEntry;
@@ -225,7 +225,7 @@ static bool DoMPQSearch_FileEntry(
             return false;
 
         // Now we have to check if this file was not enumerated before
-        if(!FileWasFoundBefore(ha, hs, pFileEntry))
+        //if(!FileWasFoundBefore(ha, hs, pHashEntry))
         {
 //          if(pFileEntry != NULL && !_stricmp(pFileEntry->szFileName, "TriggerLibs\\NativeLib.galaxy"))
 //              DebugBreak();
@@ -238,7 +238,7 @@ static bool DoMPQSearch_FileEntry(
             dwBlockIndex = (DWORD)(pFileEntry - ha->pFileTable);
 
             // Get the file name. If it's not known, we will create pseudo-name
-            szFileName = pFileEntry->szFileName;
+            szFileName = pHashEntry->szFileName;
             if(szFileName == NULL)
             {
                 // Open the file by its pseudo-name.
@@ -259,7 +259,7 @@ static bool DoMPQSearch_FileEntry(
                 {
                     // Fill the found entry. hash entry and block index are taken from the base MPQ
                     lpFindFileData->dwHashIndex  = HASH_ENTRY_FREE;
-                    lpFindFileData->dwBlockIndex = dwBlockIndex;
+                    lpFindFileData->dwBlockIndex = pHashEntry->dwBlockIndex;
                     lpFindFileData->dwFileSize   = pPatchEntry->dwFileSize;
                     lpFindFileData->dwFileFlags  = pPatchEntry->dwFlags;
                     lpFindFileData->dwCompSize   = pPatchEntry->dwCmpSize;
@@ -273,7 +273,7 @@ static bool DoMPQSearch_FileEntry(
                     if(pHashEntry != NULL)
                     {
                         lpFindFileData->dwHashIndex = (DWORD)(pHashEntry - ha->pHashTable);
-                        lpFindFileData->lcLocale = pHashEntry->lcLocale;
+                        lpFindFileData->lcLocale = pHashEntry->Locale;
                     }
 
                     // Fill the file name and plain file name
@@ -289,10 +289,10 @@ static bool DoMPQSearch_FileEntry(
     return false;
 }
 
-static DWORD DoMPQSearch_HashTable(TMPQSearch * hs, SFILE_FIND_DATA * lpFindFileData, TMPQArchive * ha)
+static DWORD DoMPQSearchInternal(TMPQSearch * hs, SFILE_FIND_DATA * lpFindFileData, TMPQArchive * ha)
 {
-    TMPQHash * pHashTableEnd = ha->pHashTable + ha->pHeader->dwHashTableSize;
-    TMPQHash * pHash;
+    THashEntry * pHashTableEnd = ha->pHashTable + ha->dwHashTableSize;
+    THashEntry * pHash;
 
     // Parse the file table
     for(pHash = ha->pHashTable + hs->dwNextIndex; pHash < pHashTableEnd; pHash++)
@@ -313,43 +313,17 @@ static DWORD DoMPQSearch_HashTable(TMPQSearch * hs, SFILE_FIND_DATA * lpFindFile
     return ERROR_NO_MORE_FILES;
 }
 
-static DWORD DoMPQSearch_FileTable(TMPQSearch * hs, SFILE_FIND_DATA * lpFindFileData, TMPQArchive * ha)
-{
-    TFileEntry * pFileTableEnd = ha->pFileTable + ha->dwFileTableSize;
-    TFileEntry * pFileEntry;
-
-    // Parse the file table
-    for(pFileEntry = ha->pFileTable + hs->dwNextIndex; pFileEntry < pFileTableEnd; pFileEntry++)
-    {
-        // Increment the next index for subsequent search
-        hs->dwNextIndex++;
-
-        // Check if this file entry should be included in the search result
-        if(DoMPQSearch_FileEntry(hs, lpFindFileData, ha, NULL, pFileEntry))
-            return ERROR_SUCCESS;
-    }
-
-    // No more files
-    return ERROR_NO_MORE_FILES;
-}
-
 // Performs one MPQ search
 static DWORD DoMPQSearch(TMPQSearch * hs, SFILE_FIND_DATA * lpFindFileData)
 {
     TMPQArchive * ha = hs->ha;
-    DWORD dwErrCode;
 
     // Start searching with base MPQ
     while(ha != NULL)
     {
-        // If the archive has hash table, we need to use hash table
-        // in order to catch hash table index and file locale.
-        // Note: If multiple hash table entries, point to the same block entry,
-        // we need, to report them all
-        dwErrCode = (ha->pHashTable != NULL) ? DoMPQSearch_HashTable(hs, lpFindFileData, ha)
-                                             : DoMPQSearch_FileTable(hs, lpFindFileData, ha);
-        if(dwErrCode == ERROR_SUCCESS)
-            return dwErrCode;
+        // Use the hash table for search
+        if(DoMPQSearchInternal(hs, lpFindFileData, ha) == ERROR_SUCCESS)
+            return ERROR_SUCCESS;
 
         // If there is no more patches in the chain, stop it.
         // This also keeps hs->ha non-NULL, which is required
@@ -420,10 +394,10 @@ HANDLE WINAPI SFileFindFirstFile(HANDLE hMpq, const char * szMask, SFILE_FIND_DA
         if(ha->haPatch != NULL)
         {
             hs->dwSearchTableItems = GetSearchTableItems(ha);
-            hs->pSearchTable = STORM_ALLOC(TFileEntry *, hs->dwSearchTableItems);
+            hs->pSearchTable = STORM_ALLOC(THashEntry *, hs->dwSearchTableItems);
             hs->dwFlagMask = MPQ_FILE_EXISTS | MPQ_FILE_PATCH_FILE;
             if(hs->pSearchTable != NULL)
-                memset(hs->pSearchTable, 0, hs->dwSearchTableItems * sizeof(TFileEntry *));
+                memset(hs->pSearchTable, 0, hs->dwSearchTableItems * sizeof(THashEntry *));
             else
                 dwErrCode = ERROR_NOT_ENOUGH_MEMORY;
         }
