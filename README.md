@@ -1,3 +1,5 @@
+C++/CLI Wrapper for Common Language Runtime (CLR) .Net 5.0 
+
 # StormLib
 
 This is official repository for the StomLib library, an open-source project that can work with Blizzard MPQ archives.
