@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "ManagedStormLib_test": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}
