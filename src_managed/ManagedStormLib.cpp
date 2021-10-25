@@ -89,7 +89,7 @@ ManagedStormLib::FileInformation::FileInformation(HANDLE _parent, InfoClass _cla
 		break;
 		case ManagedStormLib::InfoClass::FileMpqUserDataHeader://UserData
 		{
-			info = UserData::FromNativePointer((TMPQUserData*)_pInfo);
+			info = MPQUserData::FromNativePointer((TMPQUserData*)_pInfo);
 		}
 		break;
 		case ManagedStormLib::InfoClass::FileMpqUserData://Userdata without Header, byte[]

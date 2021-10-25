@@ -46,7 +46,6 @@ void ManagedStormLib::MPQArchive::RegisterCallbacks()
 
 void ManagedStormLib::MPQArchive::InitiateManagedMpqArchive()
 {
-	PopulateFieldsFromNativeStructure(_pArchive);
 	OpenFiles = gcnew List < MPQFile^ >;
 	GCHandles = gcnew List<GCHandle>;
 	RegisterCallbacks();
@@ -60,77 +59,31 @@ ManagedStormLib::MPQArchive::MPQArchive(TMPQArchive* native)
 	InitiateManagedMpqArchive();
 }
 
-void ManagedStormLib::MPQArchive::PopulateFieldsFromNativeStructure(TMPQArchive* native)
-{
-	UserDataPos = native->UserDataPos;
-	MpqPos = native->MpqPos;
-	FileSize = native->FileSize;
-	if (native->haPatch != nullptr)
-		haPatch = gcnew MPQArchive(native->haPatch);
-	if (native->haBase != nullptr)
-		haBase = gcnew MPQArchive(native->haBase);
-	pPatchPrefix = NamePrefix::FromNativePointer(native->pPatchPrefix);
-	pUserData = UserData::FromNativePointer(native->pUserData);
-	pHeader = Header::FromNativePointer(native->pHeader);
-	pHashTable = gcnew cli::array<MPQHash>(pHeader.dwHashTableSize);
-	for (size_t i = 0; i < pHeader.dwHashTableSize; i++)
-	{
-		pHashTable[i] = MPQHash::FromNativePointer((TMPQHash*)native->pHashTable + i);
-	}
 
-	//pHetTable = native->pHetTable;
-	pFileTable = gcnew cli::array<FileEntry>(pHeader.dwBlockTableSize);
-	for (size_t i = 0; i < pHeader.dwBlockTableSize; i++)
-	{
-		pFileTable[i] = FileEntry::FromNativePointer((TFileEntry*)native->pFileTable + i);
-	}
-
-	pfnHashString = (HashString^)Marshal::GetDelegateForFunctionPointer(IntPtr(native->pfnHashString), HashString::typeid);
-
-	MpqUserData = UserData::FromNativePointer(&native->UserData);
-	HeaderData = gcnew cli::array < unsigned long >(MPQ_HEADER_DWORDS);
-	for (size_t i = 0; i < MPQ_HEADER_DWORDS; i++)
-	{
-		HeaderData[i] = native->HeaderData[i];
-	}
-
-	dwHETBlockSize = native->dwHETBlockSize;
-	dwBETBlockSize = native->dwBETBlockSize;
-	dwMaxFileCount = native->dwMaxFileCount;
-	dwReservedFiles = native->dwReservedFiles;
-	dwSectorSize = native->dwSectorSize;
-	dwFileFlags1 = (MPQFileFlags)native->dwFileFlags1;
-	dwFileFlags2 = (MPQFileFlags)native->dwFileFlags2;
-	dwFileFlags3 = (MPQFileFlags)native->dwFileFlags3;
-	dwAttrFlags = (MPQAttributeFlags)native->dwAttrFlags;
-	dwFlags = (MPQFlags)native->dwFlags;
-	dwSubType = native->dwSubType;
-	pvAddFileUserData = UserData::FromNativePointer((TMPQUserData*)native->pvAddFileUserData);
-	CompactBytesProcessed = native->CompactBytesProcessed;
-	CompactTotalBytes = native->CompactTotalBytes;
-	pvCompactUserData = UserData::FromNativePointer((TMPQUserData*)native->pvCompactUserData);
-}
 
 void ManagedStormLib::MPQArchive::NativeFileAddedCallbackListener(void* pvUserData, unsigned long dwBytesWritten, unsigned long dwTotalBytes, bool bFinalCall)
 {
-	return FileAdded::raise(UserData::FromNativePointer((TMPQUserData*)pvUserData), dwBytesWritten, dwTotalBytes, bFinalCall);
+	return FileAdded::raise(MPQUserData::FromNativePointer((TMPQUserData*)pvUserData), dwBytesWritten, dwTotalBytes, bFinalCall);
 }
 
 void ManagedStormLib::MPQArchive::NativeCompactCallbackListener(void* pvUserData, unsigned long dwWorkType, unsigned long long BytesProcessed, unsigned long long TotalBytes)
 {
-	return Compacting::raise(UserData::FromNativePointer((TMPQUserData*)pvUserData), dwWorkType, BytesProcessed, TotalBytes);
+	return Compacting::raise(MPQUserData::FromNativePointer((TMPQUserData*)pvUserData), dwWorkType, BytesProcessed, TotalBytes);
 }
 
 void ManagedStormLib::MPQArchive::NativeDownloadCallbackListener(void* pvUserData, unsigned long long ByteOffset, unsigned long dwTotalBytes)
 {
-	Download::raise(UserData::FromNativePointer((TMPQUserData*)pvUserData), ByteOffset, dwTotalBytes);
+	Download::raise(MPQUserData::FromNativePointer((TMPQUserData*)pvUserData), ByteOffset, dwTotalBytes);
 }
 
-ManagedStormLib::MPQArchive::MPQArchive(String^ archiveName, [Optional][DefaultParameterValue(MPQOpenArchiveFlags::READ_ONLY)]MPQOpenArchiveFlags flags)
+ManagedStormLib::MPQArchive::MPQArchive(String^ archiveName, [Optional]Nullable<MPQOpenArchiveFlags> flags)
 {
+	if (!flags.HasValue) {
+		flags = MPQOpenArchiveFlags::_BASE_PROVIDER_FILE;
+	}
 	_fileName = archiveName;
 	HANDLE hMpq;
-	if (SFileOpenArchive(ConvertToUnicodeString(archiveName), 0, (unsigned long)flags, &hMpq))
+	if (SFileOpenArchive(ConvertToUnicodeString(archiveName), 0, (unsigned long)flags.Value, &hMpq))
 	{
 		_pArchive = (TMPQArchive*)hMpq;
 		InitiateManagedMpqArchive();
@@ -184,7 +137,8 @@ void ManagedStormLib::MPQArchive::OpenArchive(String^ MpqName, unsigned long Pri
 	{
 		Mpq = gcnew MPQArchive((TMPQArchive*)hMpq);
 	}
-	throw gcnew Win32Exception(GetNativeLastError());
+	else
+		throw gcnew Win32Exception(GetNativeLastError());
 }
 
 void ManagedStormLib::MPQArchive::CreateArchive(String^ MpqName, CreateArchiveFlags CreateFlags, unsigned long MaxFileCount, MPQArchive^% Mpq)
@@ -254,9 +208,10 @@ void ManagedStormLib::MPQArchive::CreateFile(String^ szArchivedName, DateTime Fi
 		OpenFiles->Add(phFile);
 		phFile->Closed += gcnew System::Action<ManagedStormLib::MPQFile^>(this, &ManagedStormLib::MPQArchive::OnClosed);
 
-	}else
+	}
+	else
 
-	throw gcnew Win32Exception(GetNativeLastError());
+		throw gcnew Win32Exception(GetNativeLastError());
 }
 
 void ManagedStormLib::MPQArchive::AddFileEx(String^ szFileName, String^ szArchivedName, AddFileFlags dwFlags, CompressionType dwCompression, [Optional][DefaultParameterValue(CompressionType::NEXT_SAME)] CompressionType dwCompressionNext)
@@ -329,9 +284,9 @@ void ManagedStormLib::MPQArchive::UpdateFileAttributes(String^ FileName)
 		throw gcnew Win32Exception(GetNativeLastError());
 }
 
-void ManagedStormLib::MPQArchive::OpenPatchArchive(String^ szPatchMpqName, String^ szPatchPathPrefix, unsigned long dwFlags)
+void ManagedStormLib::MPQArchive::OpenPatchArchive(String^ szPatchMpqName, String^ szPatchPathPrefix, MPQOpenArchiveFlags dwFlags)
 {
-	if (!SFileOpenPatchArchive(_pArchive, ConvertToUnicodeString(szPatchMpqName), ConvertToAnsiString(szPatchPathPrefix), dwFlags))
+	if (!SFileOpenPatchArchive(_pArchive, ConvertToUnicodeString(szPatchMpqName), ConvertToAnsiString(szPatchPathPrefix), (unsigned long)dwFlags))
 		throw gcnew Win32Exception(GetNativeLastError());
 }
 

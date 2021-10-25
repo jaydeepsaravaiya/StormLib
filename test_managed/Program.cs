@@ -1,4 +1,7 @@
 ﻿using System;
+using System.ComponentModel;
+using System.Data;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -13,35 +16,28 @@ namespace ManagedStormLib_test
         static Random random = new Random();
         static void Main(string[] args)
         {
-            var testData = new byte[1024];
-            random.NextBytes(testData);
-            File.Delete("test.mpq");
-            MPQArchive.CreateArchive("test.mpq", CreateArchiveFlags.ARCHIVE_V1 | CreateArchiveFlags.LISTFILE, 32, out MPQArchive created);
-            using (created)
+            try
             {
-                created.CreateFile("test.txt", DateTime.Now, (uint)testData.Length, null, AddFileFlags.COMPRESS, out MPQFile createdFile);
-                using (createdFile)
+                var fileInfo = new FileInfo("war3patch.mpq");
+                using var war3patch = new MPQArchive("war3patch.mpq", MPQOpenArchiveFlags.READ_ONLY);
+                war3patch.OpenPatchArchive("map.w3x", null, MPQOpenArchiveFlags.READ_ONLY);
+                war3patch.OpenFileEx("war3map.j", MpqFileSearchScope.FromMPQ, out MPQFile file);
+                using (file)
                 {
-                    createdFile.WriteFile(testData, CompressionType.ZLIB);
-                    createdFile.CloseFile();
+                    Console.WriteLine(file.Length);
                 }
-                created.FlushArchive();
-                created.CloseArchive();
             }
-            using var opened = new MPQArchive("test.mpq"); ;
-            opened.OpenFileEx("test.txt", MpqFileSearchScope.FromMPQ, out MPQFile openedFile);
-            using (openedFile)
+            catch (Win32Exception e)
             {
-                openedFile.ReadFile(out byte[] data, openedFile.GetFileSize(), out uint readByets, new NativeOverlapped());
-                if (data != testData)
-                {
-                    Console.WriteLine("Test Succeed!");
-                }
-                else
-                {
-                    Console.WriteLine("Test Failed!");
-                }
+
+                Console.WriteLine(e.Message);
             }
         }
+
+        private static void Archive_Compacting(MPQUserData pvUserData, uint dwWorkType, ulong BytesProcessed, ulong TotalBytes)
+        {
+            Console.WriteLine("Compacting...");
+        }
     }
+
 }

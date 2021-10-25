@@ -260,6 +260,7 @@
     <ClInclude Include="src_managed\ManagedTypes.h" />
     <ClInclude Include="src_managed\MPQArchive.h" />
     <ClInclude Include="src_managed\MPQFile.h" />
+    <ClInclude Include="src_managed\MPQStream.h" />
     <ClInclude Include="src_managed\Resource.h" />
   </ItemGroup>
   <ItemGroup>
@@ -267,6 +268,7 @@
     <ClCompile Include="src_managed\ManagedStormLib.cpp" />
     <ClCompile Include="src_managed\MPQArchive.cpp" />
     <ClCompile Include="src_managed\MPQFile.cpp" />
+    <ClCompile Include="src_managed\MPQStream.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="src_managed\app.rc" />

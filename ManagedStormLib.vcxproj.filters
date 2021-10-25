@@ -30,6 +30,9 @@
     <ClInclude Include="src_managed\Resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src_managed\MPQStream.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src_managed\AssemblyInfo.cpp">
@@ -42,6 +45,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src_managed\MPQFile.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src_managed\MPQStream.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

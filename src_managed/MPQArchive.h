@@ -16,18 +16,22 @@ namespace ManagedStormLib {
 
 		void InitiateManagedMpqArchive();
 		void RegisterCallbacks();
-		void PopulateFieldsFromNativeStructure(TMPQArchive* native);
 		void CloseOpenFiles();
 
 		void NativeFileAddedCallbackListener(void* pvUserData, unsigned long dwBytesWritten, unsigned long dwTotalBytes, bool bFinalCall);//Pointer for Unmanaged code to call when this event occurs
 		void NativeCompactCallbackListener(void* pvUserData, unsigned long dwWorkType, unsigned long long BytesProcessed, unsigned long long TotalBytes);//Pointer for Unmanaged code to call when this event occurs
 		void NativeDownloadCallbackListener(void* pvUserData, unsigned long long ByteOffset, unsigned long dwTotalBytes);
+
+		//property backing fields
+		MPQArchive^ _haPatch;
+		MPQArchive^ _haBase;
+		//property backing fields end
 #pragma endregion
 	public:
 #pragma region Ctor
 
 		//Can only open
-		MPQArchive(String^ archiveName, [Optional][DefaultParameterValue(MPQOpenArchiveFlags::READ_ONLY)]MPQOpenArchiveFlags flags);
+		MPQArchive(String^ archiveName, [Optional]Nullable<MPQOpenArchiveFlags> flags);
 		~MPQArchive();
 		!MPQArchive();
 #pragma endregion
@@ -35,48 +39,129 @@ namespace ManagedStormLib {
 		event FileAddedDelegate^ FileAdded; // Callback event when file gets added to created archive
 		event CompactDelegate^ Compacting; // Callback event for compacting the archive
 		event FileDownloadDelegate^ Download; // Callback event on download
+		property unsigned long long UserDataPos {unsigned long long get() { return _pArchive->UserDataPos; }}; // Position of user data (relative to the begin of the file)
+		property unsigned long long MpqPos {unsigned long long get() { return _pArchive->MpqPos; }}; // MPQ header offset (relative to the begin of the file)
+		property unsigned long long FileSize {unsigned long long get() { return _pArchive->FileSize; }}; // Size of the file at the moment of file open
+		property unsigned long dwHETBlockSize {unsigned long get() { return _pArchive->dwHETBlockSize; }};
+		property unsigned long dwBETBlockSize {unsigned long get() { return _pArchive->dwBETBlockSize; }};
+		property unsigned long dwMaxFileCount {unsigned long get() { return _pArchive->dwMaxFileCount; }}; // Maximum number of files in the MPQ. Also total size of the file table.
+		property unsigned long dwFileTableSize {unsigned long get() { return _pArchive->dwFileTableSize; }}; // Current size of the file table, e.g. index of the entry past the last occupied one
+		property unsigned long dwReservedFiles {unsigned long get() { return _pArchive->dwReservedFiles; }}; // Number of entries reserved for internal MPQ files (listfile, attributes)
+		property unsigned long dwSectorSize {unsigned long get() { return _pArchive->dwSectorSize; }}; // Default size of one file sector
+		property unsigned long dwSubType {unsigned long get() { return _pArchive->dwSubType; }}; // See MPQ_SUBTYPE_XXX
 
-		unsigned long long UserDataPos; // Position of user data (relative to the begin of the file)
-		unsigned long long MpqPos; // MPQ header offset (relative to the begin of the file)
-		unsigned long long FileSize; // Size of the file at the moment of file open
-		unsigned long dwHETBlockSize;
-		unsigned long dwBETBlockSize;
-		unsigned long dwMaxFileCount; // Maximum number of files in the MPQ. Also total size of the file table.
-		unsigned long dwFileTableSize; // Current size of the file table, e.g. index of the entry past the last occupied one
-		unsigned long dwReservedFiles; // Number of entries reserved for internal MPQ files (listfile, attributes)
-		unsigned long dwSectorSize; // Default size of one file sector
-		unsigned long dwSubType; // See MPQ_SUBTYPE_XXX
+		property MPQArchive^ haPatch {MPQArchive^ get() {
+			bool shouldCreate = false;
+			if (_pArchive->haPatch == nullptr)
+			{
+				if (_haPatch != nullptr) {
+					delete _haPatch;
+					_haPatch = nullptr;
+				}
+			}
+			else {
+				if (_haPatch != nullptr) {
+					if (_haPatch->_pArchive != _pArchive->haPatch) {
+						delete _haPatch;
+						shouldCreate = true;
+					}
+				}
+				shouldCreate = true;
+			}
+			_haPatch = shouldCreate ? gcnew MPQArchive(_pArchive->haPatch) : _haPatch;
+			return _haPatch;
+		}}; // Pointer tWo patch archive, if any
+		property MPQArchive^ haBase {MPQArchive^ get() {
+			bool shouldCreate = false;
+			if (_pArchive->haBase == nullptr)
+			{
+				if (_haBase != nullptr) {
+					delete _haBase;
+					_haBase = nullptr;
+				}
+			}
+			else {
+				if (_haBase != nullptr) {
+					if (_haBase->_pArchive != _pArchive->haBase) {
+						delete _haBase;
+						shouldCreate = true;
+					}
+				}
+				shouldCreate = true;
+			}
+			_haBase = shouldCreate ? gcnew MPQArchive(_pArchive->haBase) : _haBase;
+			return _haBase;
+		}}; // Pointer to base ("previous version") archive, if any
 
-		MPQArchive^ haPatch; // Pointer tWo patch archive, if any
-		MPQArchive^ haBase; // Pointer to base ("previous version") archive, if any
+		property NamePrefix pPatchPrefix {NamePrefix get() { return NamePrefix::FromNativePointer(_pArchive->pPatchPrefix); }}; // Patch prefix to precede names of patch files
 
-		NamePrefix pPatchPrefix; // Patch prefix to precede names of patch files
+		property MPQUserData pUserData {MPQUserData get() { return MPQUserData::FromNativePointer(_pArchive->pUserData); }}; // MPQ user data (NULL if not present in the file)
+		property MPQUserData pvAddFileUserData {MPQUserData get() {
+			return MPQUserData::FromNativePointer((TMPQUserData*)_pArchive->pvAddFileUserData);
+		}}; // User data thats passed to the callback
+		property MPQUserData pvCompactUserData {MPQUserData get() { return MPQUserData::FromNativePointer((TMPQUserData*)_pArchive->pvCompactUserData); }}; // User data thats passed to the callback
+		property MPQUserData UserData {MPQUserData get() { return MPQUserData::FromNativeStructure(_pArchive->UserData); }}; // MPQ user data. Valid only when ID_MPQ_USERDATA has been found
 
-		UserData pUserData; // MPQ user data (NULL if not present in the file)
-		UserData pvAddFileUserData; // User data thats passed to the callback
-		UserData pvCompactUserData; // User data thats passed to the callback
-		UserData MpqUserData; // MPQ user data. Valid only when ID_MPQ_USERDATA has been found
+		property Header pHeader {Header get() { return Header::FromNativePointer(_pArchive->pHeader); }}; // MPQ file header
 
-		Header pHeader; // MPQ file header
+		property HetTable pHetTable {HetTable get() { return HetTable::FromNativePointer(_pArchive->pHetTable); }}; // HET table
 
-		HetTable pHetTable; // HET table
+		property HashString^ pfnHashString {HashString^ get() {
+			return (HashString^)Marshal::GetDelegateForFunctionPointer(IntPtr(_pArchive->pfnHashString), HashString::typeid);
+		} };               // Hashing function that will convert the file name into hash
 
-		HashString^ pfnHashString;               // Hashing function that will convert the file name into hash
+		property cli::array < MPQHash >^ pHashTable {
+			cli::array<MPQHash>^ get() {
+				cli::array<MPQHash>^ value = gcnew cli::array<MPQHash>(pHeader.dwHashTableSize);
+				for (size_t i = 0; i < pHeader.dwHashTableSize; i++)
+				{
+					value[i] = MPQHash::FromNativePointer((TMPQHash*)_pArchive->pHashTable + i);
+				}
+				return value;
+			}
+		}; // Hash table
+		property cli::array < FileEntry >^ pFileTable {
+			cli::array < FileEntry >^ get() {
 
+				cli::array<FileEntry>^ value = gcnew cli::array<FileEntry>(pHeader.dwBlockTableSize);
+				for (size_t i = 0; i < pHeader.dwBlockTableSize; i++)
+				{
+					value[i] = FileEntry::FromNativePointer((TFileEntry*)_pArchive->pFileTable + i);
+				}
+				return value;
+			}
+		}; // File table
+		property cli::array < unsigned long >^ HeaderData {
+			cli::array < unsigned long >^ get() {
+				cli::array < unsigned long >^ value = gcnew cli::array < unsigned long >(MPQ_HEADER_DWORDS);
+				for (size_t i = 0; i < MPQ_HEADER_DWORDS; i++)
+				{
+					value[i] = _pArchive->HeaderData[i];
+				}
+				return value;
+			}
+		}; // Storage for MPQ header
 
-		cli::array < MPQHash >^ pHashTable; // Hash table
-		cli::array < FileEntry >^ pFileTable; // File table
-		cli::array < unsigned long >^ HeaderData; // Storage for MPQ header
+		property MPQFlags dwFlags { MPQFlags get() {
+			return (MPQFlags)_pArchive->dwFlags;
+		} }; // See MPQ_FLAG_XXXXX
 
-		MPQFlags dwFlags; // See MPQ_FLAG_XXXXX
+		property MPQFileFlags dwFileFlags1 { MPQFileFlags get() {
+			return (MPQFileFlags)_pArchive->dwFileFlags1;
+		} }; // Flags for (listfile)
+		property MPQFileFlags dwFileFlags2 { MPQFileFlags get() {
+			return (MPQFileFlags)_pArchive->dwFileFlags2;
+		} }; // Flags for (attributes)
+		property MPQFileFlags dwFileFlags3 { MPQFileFlags get() {
+			return (MPQFileFlags)_pArchive->dwFileFlags3;
+		} }; // Flags for (signature)
+		property MPQAttributeFlags dwAttrFlags { MPQAttributeFlags get() {
+			return (MPQAttributeFlags)_pArchive->dwAttrFlags;
+		} }; // Flags for the (attributes) file, see MPQ_ATTRIBUTE_XXX
 
-		MPQFileFlags dwFileFlags1; // Flags for (listfile)
-		MPQFileFlags dwFileFlags2; // Flags for (attributes)
-		MPQFileFlags dwFileFlags3; // Flags for (signature)
-		MPQAttributeFlags dwAttrFlags; // Flags for the (attributes) file, see MPQ_ATTRIBUTE_XXX
+		property unsigned long long CompactBytesProcessed { unsigned long long get() { return _pArchive->CompactBytesProcessed; } }; // Amount of bytes that have been processed during a particular compact call
+		property unsigned long long CompactTotalBytes { unsigned long long get() { return _pArchive->CompactTotalBytes; } }; // Total amount of bytes to be compacted
 
-		unsigned long long CompactBytesProcessed; // Amount of bytes that have been processed during a particular compact call
-		unsigned long long CompactTotalBytes; // Total amount of bytes to be compacted
 #pragma endregion
 #pragma region Functions for Archive Manipulation (Open/Create/Update)
 		//-----------------------------------------------------------------------------
@@ -127,7 +212,7 @@ namespace ManagedStormLib {
 		//-----------------------------------------------------------------------------
 		// Functions for manipulation with patch archives
 
-		void OpenPatchArchive(String^ szPatchMpqName, String^ szPatchPathPrefix, unsigned long dwFlags);
+		void OpenPatchArchive(String^ szPatchMpqName, String^ szPatchPathPrefix, MPQOpenArchiveFlags dwFlags);
 		bool IsPatchedArchive();
 
 #pragma endregion

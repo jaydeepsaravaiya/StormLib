@@ -27,13 +27,13 @@ namespace ManagedStormLib {
 	ref class MPQFile;
 
 	public delegate void FileDownloadNativeDelegate(void* pvUserData, unsigned long long ByteOffset, unsigned long dwTotalBytes);//For when Archive callbacks
-	public delegate void FileDownloadDelegate(UserData pvUserData, unsigned long long ByteOffset, unsigned long dwTotalBytes);//Forwarding towards managed
+	public delegate void FileDownloadDelegate(MPQUserData pvUserData, unsigned long long ByteOffset, unsigned long dwTotalBytes);//Forwarding towards managed
 
 	public delegate void FileAddedNativeDelegate(void* pvUserData, unsigned long dwBytesWritten, unsigned long dwTotalBytes, bool bFinalCall);
-	public delegate void FileAddedDelegate(UserData pvUserData, unsigned long dwBytesWritten, unsigned long dwTotalBytes, bool bFinalCall);
+	public delegate void FileAddedDelegate(MPQUserData pvUserData, unsigned long dwBytesWritten, unsigned long dwTotalBytes, bool bFinalCall);
 
 	public delegate void CompactNativeDelegate(void* pvUserData, unsigned long dwWorkType, unsigned long long BytesProcessed, unsigned long long TotalBytes);
-	public delegate void CompactDelegate(UserData pvUserData, unsigned long dwWorkType, unsigned long long BytesProcessed, unsigned long long TotalBytes);
+	public delegate void CompactDelegate(MPQUserData pvUserData, unsigned long dwWorkType, unsigned long long BytesProcessed, unsigned long long TotalBytes);
 
 	public delegate unsigned long HashString(String^ szFileName, unsigned long dwHashType);
 	public delegate unsigned long NativeHashString(const char* szFileName, unsigned long dwHashType);
@@ -77,4 +77,6 @@ namespace ManagedStormLib {
 		static bool SetDataCompression(DWORD DataCompression);
 		static bool SetArchiveMarkers(PSFILE_MARKERS pMarkers);
 	};
+
+
 }

@@ -4,6 +4,51 @@
 #include "MPQFile.h"
 using namespace std;
 using namespace System::ComponentModel;
+void ManagedStormLib::MPQFile::Flush()
+{
+	FinishFile();
+}
+
+int ManagedStormLib::MPQFile::Read(cli::array<byte>^ buffer, int offset, int count)
+{
+
+	Seek(_pFile->dwFilePos + offset, SeekOrigin::Begin);
+	pin_ptr<byte> lpBuffer = &buffer[0];
+	unsigned long readBytes;
+	bool result = SFileReadFile(_pFile, lpBuffer, count, &readBytes, nullptr);
+	if (result || GetNativeLastError() == ERROR_HANDLE_EOF) {
+		return readBytes;
+	}
+	else
+		throw gcnew Win32Exception(GetNativeLastError());
+
+}
+long long ManagedStormLib::MPQFile::Seek(long long  offset, SeekOrigin origin)
+{
+	BigInteger bi;
+	bi.value = offset;
+	long filePosLow = SFileSetFilePointer(_pFile, bi.parts.lowValue, &bi.parts.highValue, (unsigned long)origin);
+	if (filePosLow != -1) {
+		return bi.value;
+	}
+	throw gcnew Win32Exception(GetNativeLastError());
+}
+void ManagedStormLib::MPQFile::SetLength(long long  value)
+{
+	_pFile->dwDataSize = value;
+	_pFile->pFileEntry->dwFileSize = value;
+	//throw gcnew System::NotSupportedException();
+}
+void ManagedStormLib::MPQFile::Write(cli::array<byte>^ buffer, int offset, int count)
+{
+	//if (_pFile->dwDataSize < _pFile->dwFilePos + offset + count)
+	SetLength(max(_pFile->dwDataSize, _pFile->dwFilePos + offset + count));
+	Seek(_pFile->dwFilePos + offset, SeekOrigin::Begin);
+	pin_ptr<byte> lpBuffer = &buffer[0];
+	//unsigned long readBytes;
+	if (!SFileWriteFile(_pFile, lpBuffer, count, _pFile->dwCompression0))
+		throw gcnew Win32Exception(GetNativeLastError());
+}
 ManagedStormLib::MPQFile::MPQFile(MPQArchive^ parent, TMPQFile* hFile)
 {
 	ParentArchive = parent;
@@ -45,13 +90,11 @@ bool ManagedStormLib::MPQFile::SetFileLocale(CultureInfo^ NewLocale)
 void ManagedStormLib::MPQFile::WriteFile(cli::array<byte>^ buffer, CompressionType dwCompression)
 {
 	pin_ptr<byte> pvData = &buffer[0];
-	_pFile->dwDataSize += buffer->Length;
-	_pFile->pFileEntry->dwFileSize += buffer->Length;
+	unsigned long previousDataSize = _pFile->dwDataSize;
+	SetLength(buffer->Length);
 	if (!SFileWriteFile(_pFile, pvData, buffer->Length, (unsigned long)dwCompression)) {
-
 		//failed to write
-		_pFile->pFileEntry->dwFileSize -= buffer->Length;
-		_pFile->dwDataSize -= buffer->Length;
+		SetLength(previousDataSize);
 		throw gcnew Win32Exception(GetNativeLastError());
 	}
 }
@@ -72,13 +115,10 @@ unsigned long ManagedStormLib::MPQFile::SetFilePointer(long lFilePos, [Out]long%
 	return SFileSetFilePointer(_pFile, lFilePos, plFilePosHigh, (unsigned long)dwMoveMethod);
 }
 
-bool ManagedStormLib::MPQFile::ReadFile([Out] cli::array<byte>^% Buffer, unsigned long ToRead, [Out] unsigned long% Read, NativeOverlapped Overlapped)
+void ManagedStormLib::MPQFile::ReadFile([Out] cli::array<byte>^% Buffer, unsigned long ToRead, [Out] unsigned long% readBytes, Nullable<NativeOverlapped> Overlapped)
 {
-	Buffer = gcnew cli::array<byte>(_pFile->dwDataSize);
-	pin_ptr<byte> lpBuffer = &Buffer[0];
-	pin_ptr<NativeOverlapped> lpOverlapped = &Overlapped;
-	pin_ptr < unsigned long > pdwRead = &Read;
-	return SFileReadFile(_pFile, lpBuffer, ToRead, pdwRead, (LPOVERLAPPED)lpOverlapped);
+	Buffer = gcnew cli::array<byte>(ToRead);
+	readBytes = Read(Buffer, 0, ToRead);
 }
 
 bool ManagedStormLib::MPQFile::CloseFile()
