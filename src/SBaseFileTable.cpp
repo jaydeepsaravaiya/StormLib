@@ -2522,8 +2522,8 @@ static DWORD BuildFileTable_Classic(TMPQArchive * ha)
         dwErrCode = ERROR_NOT_ENOUGH_MEMORY;
     }
 
-    // Load the hi-block table
-    if(dwErrCode == ERROR_SUCCESS && pHeader->HiBlockTablePos64 != 0)
+    // Load the hi-block table.0
+
     {
         ULONGLONG ByteOffset;
         USHORT * pHiBlockTable = NULL;

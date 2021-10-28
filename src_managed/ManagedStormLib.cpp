@@ -205,8 +205,10 @@ void ManagedStormLib::FileInformation::FreeFileInfo()
 {
 	if (_pInfo == nullptr)
 		return;
-	if (!SFileFreeFileInfo(_pInfo, (SFileInfoClass)Class)) { // has no effect if FileInfo is not Freeable
-		throw gcnew Win32Exception(GetNativeLastError());
+	if (Class == InfoClass::FileMpqHetTable || Class == InfoClass::FileMpqBetTable) {
+		if (!SFileFreeFileInfo(_pInfo, (SFileInfoClass)Class)) { 
+			throw gcnew Win32Exception(GetNativeLastError());
+		}
 	}
 	_pInfo = nullptr;
 }

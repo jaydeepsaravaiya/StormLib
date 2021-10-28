@@ -57,19 +57,18 @@ ManagedStormLib::MPQFile::MPQFile(MPQArchive^ parent, TMPQFile* hFile)
 
 ManagedStormLib::MPQFile::~MPQFile()
 {
-	std::cout << "Disposing File" << std::endl;
-	Closed::raise(this);
-	this->!MPQFile();
+	if (_pFile != nullptr) {
+		std::cout << "Disposing File : " << _pFile->pFileEntry->szFileName << std::endl;
+		Closed::raise(this);
+		this->!MPQFile();
+	}
 }
 
 ManagedStormLib::MPQFile::!MPQFile()
 {
-	std::cout << "Finalizing File" << std::endl;
-	if (_pFile != nullptr)
-	{
-		SFileCloseFile(_pFile);
-		_pFile = nullptr;
-	}
+	std::cout << "Finalizing File : " << _pFile->pFileEntry->szFileName << std::endl;
+	SFileCloseFile(_pFile);
+	_pFile = nullptr;
 }
 
 bool ManagedStormLib::MPQFile::SetFileLocale(CultureInfo^ NewLocale)

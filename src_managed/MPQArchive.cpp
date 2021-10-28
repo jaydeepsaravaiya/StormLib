@@ -54,7 +54,9 @@ void ManagedStormLib::MPQArchive::InitiateManagedMpqArchive()
 ManagedStormLib::MPQArchive::MPQArchive(TMPQArchive* native)
 {
 	if (native == nullptr)
-		return;
+		throw gcnew ArgumentException("Argument native cannot be null pointer.");
+	FileInformation^ info = gcnew FileInformation(native, InfoClass::FileMpqFileName);
+	_fileName = (String^)info->info;
 	_pArchive = native;
 	InitiateManagedMpqArchive();
 }
@@ -73,15 +75,16 @@ void ManagedStormLib::MPQArchive::NativeCompactCallbackListener(void* pvUserData
 
 void ManagedStormLib::MPQArchive::NativeDownloadCallbackListener(void* pvUserData, unsigned long long ByteOffset, unsigned long dwTotalBytes)
 {
-	Download::raise(MPQUserData::FromNativePointer((TMPQUserData*)pvUserData), ByteOffset, dwTotalBytes);
+	return Download::raise(MPQUserData::FromNativePointer((TMPQUserData*)pvUserData), ByteOffset, dwTotalBytes);
 }
 
 ManagedStormLib::MPQArchive::MPQArchive(String^ archiveName, [Optional]Nullable<MPQOpenArchiveFlags> flags)
 {
-	if (!flags.HasValue) {
+	if (!flags.HasValue) {// No Optional argument in CLI/C++
 		flags = MPQOpenArchiveFlags::_BASE_PROVIDER_FILE;
 	}
 	_fileName = archiveName;
+	Console::WriteLine("Creating Archive " + _fileName);
 	HANDLE hMpq;
 	if (SFileOpenArchive(ConvertToUnicodeString(archiveName), 0, (unsigned long)flags.Value, &hMpq))
 	{
@@ -96,7 +99,6 @@ ManagedStormLib::MPQArchive::MPQArchive(String^ archiveName, [Optional]Nullable<
 
 ManagedStormLib::MPQArchive::~MPQArchive()
 {
-	std::cout << "Disposing Archive" << std::endl;
 	for each (GCHandle handle in GCHandles)
 	{
 		handle.Free();
@@ -110,21 +112,24 @@ ManagedStormLib::MPQArchive::~MPQArchive()
 
 ManagedStormLib::MPQArchive::!MPQArchive()
 {
-	std::cout << "Finalizing Archive" << std::endl;
 	CloseArchive();
+	if (haPatch != nullptr) {
+		delete haPatch;
+		haPatch = nullptr;
+	}
 }
 
 CultureInfo^ ManagedStormLib::MPQArchive::GetLocale()
 {
 	if (SFileGetLocale() == 0)
-		return nullptr;
+		return nullptr;// It means Locale is Neutral, but as Windows doesnt have Neutral Culture, its imitated by null
 	return gcnew CultureInfo(SFileGetLocale());
 }
 
 unsigned long ManagedStormLib::MPQArchive::SetLocale(CultureInfo^ lcNewLocale)
 {
 	if (lcNewLocale == nullptr) {
-		return SFileSetLocale(0);
+		return SFileSetLocale(0);// Check MPQArchive::GetLocale for info.
 	}
 	return SFileSetLocale(lcNewLocale->LCID);
 }
@@ -148,7 +153,6 @@ void ManagedStormLib::MPQArchive::CreateArchive(String^ MpqName, CreateArchiveFl
 	if (result)
 	{
 		Mpq = gcnew MPQArchive((TMPQArchive*)hMpq);
-
 	}
 	else
 		throw gcnew Win32Exception(GetNativeLastError());
@@ -177,16 +181,13 @@ void ManagedStormLib::MPQArchive::FlushArchive()
 
 void ManagedStormLib::MPQArchive::CloseArchive()
 {
-	if (_pArchive == nullptr)
-		return;
-	CloseOpenFiles();
-	if (SFileCloseArchive(_pArchive))
-	{
-		_pArchive = nullptr;
-
+	if (_pArchive != nullptr) {
+		CloseOpenFiles();
+		if (haBase == nullptr)//Base archive will close our unmanaged handle. so dont bother, plus it will throw access violation if same handle is tried to be freed twice
+			if (!SFileCloseArchive(_pArchive))
+				throw gcnew Win32Exception(GetNativeLastError());
 	}
-	else
-		throw gcnew Win32Exception(GetNativeLastError());
+	_pArchive = nullptr;
 }
 
 void ManagedStormLib::MPQArchive::CreateFile(String^ szArchivedName, DateTime FileTime, unsigned long dwFileSize, CultureInfo^ Locale, AddFileFlags dwFlags, [Out] MPQFile^% phFile)
@@ -207,10 +208,8 @@ void ManagedStormLib::MPQArchive::CreateFile(String^ szArchivedName, DateTime Fi
 		phFile = gcnew MPQFile(this, (TMPQFile*)hFile);
 		OpenFiles->Add(phFile);
 		phFile->Closed += gcnew System::Action<ManagedStormLib::MPQFile^>(this, &ManagedStormLib::MPQArchive::OnClosed);
-
 	}
 	else
-
 		throw gcnew Win32Exception(GetNativeLastError());
 }
 
@@ -267,11 +266,10 @@ void ManagedStormLib::MPQArchive::SetMaxFileCount(unsigned long MaxFileCount)
 		throw gcnew Win32Exception(GetNativeLastError());
 }
 
-unsigned long ManagedStormLib::MPQArchive::GetAttributes()
+ManagedStormLib::MPQAttributeFlags ManagedStormLib::MPQArchive::GetAttributes()
 {
-	return SFileGetAttributes(_pArchive);
+	return (MPQAttributeFlags)SFileGetAttributes(_pArchive);
 }
-
 void ManagedStormLib::MPQArchive::SetAttributes(MPQAttributeFlags Flags)
 {
 	if (!SFileSetAttributes(_pArchive, (unsigned long)Flags))
@@ -286,7 +284,11 @@ void ManagedStormLib::MPQArchive::UpdateFileAttributes(String^ FileName)
 
 void ManagedStormLib::MPQArchive::OpenPatchArchive(String^ szPatchMpqName, String^ szPatchPathPrefix, MPQOpenArchiveFlags dwFlags)
 {
-	if (!SFileOpenPatchArchive(_pArchive, ConvertToUnicodeString(szPatchMpqName), ConvertToAnsiString(szPatchPathPrefix), (unsigned long)dwFlags))
+	if (SFileOpenPatchArchive(_pArchive, ConvertToUnicodeString(szPatchMpqName), ConvertToAnsiString(szPatchPathPrefix), (unsigned long)dwFlags)) {
+		haPatch = gcnew MPQArchive(_pArchive->haPatch);
+		haPatch->haBase = this;
+	}
+	else
 		throw gcnew Win32Exception(GetNativeLastError());
 }
 

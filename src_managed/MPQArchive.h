@@ -50,7 +50,7 @@ namespace ManagedStormLib {
 		property unsigned long dwSectorSize {unsigned long get() { return _pArchive->dwSectorSize; }}; // Default size of one file sector
 		property unsigned long dwSubType {unsigned long get() { return _pArchive->dwSubType; }}; // See MPQ_SUBTYPE_XXX
 
-		property MPQArchive^ haPatch {MPQArchive^ get() {
+		property MPQArchive^ haPatch /*{MPQArchive^ get() {
 			bool shouldCreate = false;
 			if (_pArchive->haPatch == nullptr)
 			{
@@ -70,8 +70,9 @@ namespace ManagedStormLib {
 			}
 			_haPatch = shouldCreate ? gcnew MPQArchive(_pArchive->haPatch) : _haPatch;
 			return _haPatch;
-		}}; // Pointer tWo patch archive, if any
-		property MPQArchive^ haBase {MPQArchive^ get() {
+		}
+		}*/; // Pointer tWo patch archive, if any
+		property MPQArchive^ haBase /*{MPQArchive^ get() {
 			bool shouldCreate = false;
 			if (_pArchive->haBase == nullptr)
 			{
@@ -91,7 +92,7 @@ namespace ManagedStormLib {
 			}
 			_haBase = shouldCreate ? gcnew MPQArchive(_pArchive->haBase) : _haBase;
 			return _haBase;
-		}}; // Pointer to base ("previous version") archive, if any
+		}}*/; // Pointer to base ("previous version") archive, if any
 
 		property NamePrefix pPatchPrefix {NamePrefix get() { return NamePrefix::FromNativePointer(_pArchive->pPatchPrefix); }}; // Patch prefix to precede names of patch files
 
@@ -203,7 +204,7 @@ namespace ManagedStormLib {
 		void SetMaxFileCount(unsigned long MaxFileCount);
 
 		// Changing (attributes) file
-		unsigned long GetAttributes();
+		MPQAttributeFlags GetAttributes();
 		void SetAttributes(MPQAttributeFlags Flags);
 		void UpdateFileAttributes(String^ FileName);
 
